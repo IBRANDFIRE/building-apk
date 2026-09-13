@@ -3,8 +3,8 @@ name: Auto Zip to Android APK
 on:
   push:
     paths:
-      - '**.zip'       # Triggers whenever a .zip file is uploaded or updated
-  workflow_dispatch:   # Allows manual trigger from GitHub interface
+      - '**.zip'
+  workflow_dispatch:
 
 jobs:
   build-apk:
@@ -20,19 +20,8 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Android SDK & Command Line Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk unzip
-          mkdir -p android-sdk/cmdline-tools
-          cd android-sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
-          unzip -q tools.zip
-          mv cmdline-tools latest
-          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Create Native WebView Wrapper & Unzip Assets
         run: |
@@ -44,12 +33,12 @@ jobs:
           fi
           echo "Found zip archive: $ZIP_FILE"
 
-          # 2. Generate android project layout
+          # 2. Generate project directories
           mkdir -p android-project/app/src/main/assets
           mkdir -p android-project/app/src/main/res/values
           mkdir -p android-project/app/src/main/java/com/example/htmlapp
 
-          # 3. Unzip HTML assets directly into the Android assets directory
+          # 3. Extract web assets
           unzip -o "$ZIP_FILE" -d android-project/app/src/main/assets/
 
           # 4. Generate AndroidManifest.xml
@@ -75,7 +64,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. Generate MainActivity.java to render index.html
+          # 5. Generate MainActivity.java
           cat << 'EOF' > android-project/app/src/main/java/com/example/htmlapp/MainActivity.java
           package com.example.htmlapp;
 
@@ -104,7 +93,7 @@ jobs:
           }
           EOF
 
-          # 6. Generate Gradle Configuration Files
+          # 6. Generate Gradle configuration
           cat << 'EOF' > android-project/settings.gradle
           include ':app'
           EOF
@@ -149,9 +138,10 @@ jobs:
           }
           EOF
 
-      - name: Compile APK via Gradle
+      - name: Build Debug APK
         run: |
-          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
+          unset ANDROID_SDK_ROOT
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
           cd android-project
           gradle assembleDebug
 
@@ -160,3 +150,4 @@ jobs:
         with:
           name: converted-app.apk
           path: android-project/app/build/outputs/apk/debug/*.apk
+
