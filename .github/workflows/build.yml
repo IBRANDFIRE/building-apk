@@ -1,4 +1,3 @@
-
 name: Auto Zip to Android APK
 
 on:
@@ -26,7 +25,7 @@ jobs:
 
       - name: Create Native WebView Wrapper & Unzip Assets
         run: |
-          # 1. Locate the uploaded zip file
+          # 1. Locate uploaded zip
           ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
           if [ -z "$ZIP_FILE" ]; then
             echo "Error: No .zip file found in the repository!"
@@ -34,15 +33,15 @@ jobs:
           fi
           echo "Found zip archive: $ZIP_FILE"
 
-          # 2. Generate project directories
+          # 2. Setup project structure
           mkdir -p android-project/app/src/main/assets
           mkdir -p android-project/app/src/main/res/values
           mkdir -p android-project/app/src/main/java/com/example/htmlapp
 
-          # 3. Extract web assets
+          # 3. Unzip assets
           unzip -o "$ZIP_FILE" -d android-project/app/src/main/assets/
 
-          # 4. Generate AndroidManifest.xml
+          # 4. Create AndroidManifest.xml
           cat << 'EOF' > android-project/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -65,7 +64,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. Generate MainActivity.java
+          # 5. Create MainActivity.java
           cat << 'EOF' > android-project/app/src/main/java/com/example/htmlapp/MainActivity.java
           package com.example.htmlapp;
 
@@ -94,7 +93,7 @@ jobs:
           }
           EOF
 
-          # 6. Generate Gradle configuration
+          # 6. Create Gradle Files
           cat << 'EOF' > android-project/settings.gradle
           include ':app'
           EOF
@@ -141,8 +140,6 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          unset ANDROID_SDK_ROOT
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
           cd android-project
           gradle assembleDebug
 
@@ -151,6 +148,3 @@ jobs:
         with:
           name: converted-app.apk
           path: android-project/app/build/outputs/apk/debug/*.apk
-          
-
-
