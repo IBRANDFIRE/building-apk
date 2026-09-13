@@ -1,0 +1,162 @@
+name: Auto Zip to Android APK
+
+on:
+  push:
+    paths:
+      - '**.zip'       # Triggers whenever a .zip file is uploaded or updated
+  workflow_dispatch:   # Allows manual trigger from GitHub interface
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Android SDK & Command Line Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openjdk-17-jdk unzip
+          mkdir -p android-sdk/cmdline-tools
+          cd android-sdk/cmdline-tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
+          unzip -q tools.zip
+          mv cmdline-tools latest
+          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Create Native WebView Wrapper & Unzip Assets
+        run: |
+          # 1. Locate the uploaded zip file
+          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Error: No .zip file found in the repository!"
+            exit 1
+          fi
+          echo "Found zip archive: $ZIP_FILE"
+
+          # 2. Generate android project layout
+          mkdir -p android-project/app/src/main/assets
+          mkdir -p android-project/app/src/main/res/values
+          mkdir -p android-project/app/src/main/java/com/example/htmlapp
+
+          # 3. Unzip HTML assets directly into the Android assets directory
+          unzip -o "$ZIP_FILE" -d android-project/app/src/main/assets/
+
+          # 4. Generate AndroidManifest.xml
+          cat << 'EOF' > android-project/app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.example.htmlapp">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:allowBackup="true"
+                  android:label="HTML App"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # 5. Generate MainActivity.java to render index.html
+          cat << 'EOF' > android-project/app/src/main/java/com/example/htmlapp/MainActivity.java
+          package com.example.htmlapp;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView webView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  webView = new WebView(this);
+                  WebSettings webSettings = webView.getSettings();
+                  webSettings.setJavaScriptEnabled(true);
+                  webSettings.setDomStorageEnabled(true);
+                  webSettings.setAllowFileAccessFromFileURLs(true);
+                  webSettings.setAllowUniversalAccessFromFileURLs(true);
+                  webView.setWebViewClient(new WebViewClient());
+                  webView.loadUrl("file:///android_asset/index.html");
+                  setContentView(webView);
+              }
+          }
+          EOF
+
+          # 6. Generate Gradle Configuration Files
+          cat << 'EOF' > android-project/settings.gradle
+          include ':app'
+          EOF
+
+          cat << 'EOF' > android-project/build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.0'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+          cat << 'EOF' > android-project/app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.example.htmlapp'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.htmlapp"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+          }
+          EOF
+
+      - name: Compile APK via Gradle
+        run: |
+          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
+          cd android-project
+          gradle assembleDebug
+
+      - name: Upload Finished APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: converted-app.apk
+          path: android-project/app/build/outputs/apk/debug/*.apk
